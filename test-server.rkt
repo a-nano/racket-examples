@@ -5,6 +5,19 @@
          net/base64)
 (require file/convertible)
 
+; serve files from this directory:
+(define document-root
+  (path->string (current-directory)))
+
+; a table to map file extensions to MIME types:
+(define ext=>mime-type
+  #hash((#"" . #"text/html; charset=utf-8")
+        (#"html" . #"text/html; charset=utf-8")
+        (#"txt" . #"text/html; charset=utf-8")
+        (#"png" . #"image/png")
+        (#"jpeg" . #"image/jpeg")
+        (#"rkt" . #"text/x-racket; charset=utf-8")))
+
 ;; pict -> String
 (define (pict->data-uri pict)
   (format "data:image/*;base64,~a"　; image/png, image/jpeg
@@ -13,11 +26,27 @@
 ;; main-servlet
 (define (main-servlet req)
 
+  ; extract the URI from the request:
   (define uri (request-uri req))
-  (define path (map path/param-path (url-path uri)))
-  (define page (car path))
+
+  ; extract the resource from the URI:
+  (define resource
+    (map path/param-path (url-path uri)))
+
+  (define page (car resource))
+
+  ; find the file location
+  (define file (string-append
+                document-root
+                "/"
+                (string-join resource "/")))
 
   (cond
+
+    ;;;;;;;;;;;;;;;;;;;
+    ;; dynamic 
+    ;;;;;;;;;;;;;;;;;;;
+    
     ; /
     [(equal? page "")
      (response/xexpr
@@ -88,10 +117,38 @@
         (body
          (p "アップされた写真")
          (img ([src ,(pict->data-uri content-data)])))))]
+
+
+    ;;;;;;;;;;;;;;;;;;;
+    ;; static files
+    ;;;;;;;;;;;;;;;;;;;
+    
+    ; serve the file if it exists:
+    [(file-exists? file)
+
+     ; find the MIME type:
+     (define extension (filename-extension file))
+     (define mime-type
+       (hash-ref ext=>mime-type extension
+                 (lambda () TEXT/HTML-MIME-TYPE)))
+
+     ; read the file contents:
+     (define data (file->bytes file))
+
+     ; construct the response
+     (response
+      200 #"Ok"
+      (current-seconds)
+      mime-type
+      '()
+      (lambda (client-out)
+        (write-bytes data client-out)))]
     
     ; page not found
     [else
      (response/xexpr
+      #:code 404
+      #:message #"Not found"
       `(html
         (body
          (p "Page not found!"))))]))
